@@ -126,7 +126,7 @@ func (p *piaV4) PortForward(ctx context.Context, client *http.Client,
 	if p.activeProtocol == constants.TCP {
 		commonName = p.activeServer.OpenvpnTCP.CN
 	}
-	client, err := newPIAv4HTTPClient(commonName, gateway)
+	client, err := newPIAv4HTTPClient(commonName)
 	if err != nil {
 		pfLogger.Error("aborting because: %s", err)
 		return
@@ -231,7 +231,8 @@ func (p *piaV4) PortForward(ctx context.Context, client *http.Client,
 			if err := bindPIAPort(client, gateway, data); err != nil {
 				pfLogger.Error(err)
 			}
-			keepAliveTicker.Reset(keepAlivePeriod)
+			keepAliveTicker.Stop()
+			keepAliveTicker = time.NewTicker(keepAlivePeriod)
 			expiryTimer.Reset(durationToExpiration)
 		}
 	}
@@ -249,7 +250,7 @@ func filterPIAServers(servers []models.PIAServer, region string) (filtered []mod
 	return nil
 }
 
-func newPIAv4HTTPClient(commonName string, gateway net.IP) (client *http.Client, err error) {
+func newPIAv4HTTPClient(commonName string) (client *http.Client, err error) {
 	certificateBytes, err := base64.StdEncoding.DecodeString(constants.PIACertificateStrong)
 	if err != nil {
 		return nil, fmt.Errorf("cannot decode PIA root certificate: %w", err)
@@ -259,16 +260,14 @@ func newPIAv4HTTPClient(commonName string, gateway net.IP) (client *http.Client,
 		return nil, fmt.Errorf("cannot parse PIA root certificate: %w", err)
 	}
 	certificate.Subject.CommonName = commonName
-	certificate.Issuer.CommonName = commonName
-	certificate.DNSNames = []string{commonName}
-	certificate.IPAddresses = []net.IP{{10, 0, 0, 1}, gateway}
+	certificate.Issuer.CommonName = "Private Internet Access"
 	rootCAs := x509.NewCertPool()
 	rootCAs.AddCert(certificate)
 	TLSClientConfig := &tls.Config{
 		RootCAs:    rootCAs,
 		MinVersion: tls.VersionTLS12,
 		// TODO disable once SAN is added to PIA servers certificates, see https://github.com/pia-foss/manual-connections/issues/10
-		InsecureSkipVerify: true, //nolint:gosec
+		InsecureSkipVerify: false, //nolint:gosec
 	}
 	transport := http.Transport{
 		TLSClientConfig: TLSClientConfig,
